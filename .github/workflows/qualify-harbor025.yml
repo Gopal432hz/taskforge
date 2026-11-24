@@ -17,8 +17,8 @@ jobs:
           git init published
           git -C published remote add origin https://github.com/Gopal432hz/taskforge.git
           git -C published fetch --depth=1 origin main
-          git -C published show FETCH_HEAD:1-taskforge-rebuild-review.zip > rebuild.zip
-          echo '556c8152783b3644cbfe7af3d07a1f35bc6daefe0c9ee46c984008d6b6035b79  rebuild.zip' | sha256sum --check
+          git -C published show FETCH_HEAD:1-taskforge-rebuild-environment-fix.zip > rebuild.zip
+          echo '58d8f41be500211c66de97a5946562bc3d597fd853e2ec358f8df7942d507451  rebuild.zip' | sha256sum --check
           python3 -m zipfile -e rebuild.zip source
       - name: Install pinned host and generate from clean baseline
         shell: bash
@@ -36,6 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$RUNNER_TEMP/harbor-host/bin:$PATH"
+          trap 'find "$RUNNER_TEMP/harbor-runs" -type f \( -name "test-stdout.txt" -o -name "reward.json" \) -print -exec tail -n 100 {} \; 2>/dev/null || true' EXIT
           harbor --version
           docker version
           for task in choice-aliases delimited duration key-value stepped-range; do
