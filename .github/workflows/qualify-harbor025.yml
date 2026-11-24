@@ -1,0 +1,46 @@
+name: Qualify TaskForge Harbor 0.25 packages
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: taskforge-harbor-qualification
+  cancel-in-progress: false
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Fetch approved rebuild archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init published
+          git -C published remote add origin https://github.com/Gopal432hz/taskforge.git
+          git -C published fetch --depth=1 origin main
+          git -C published show FETCH_HEAD:1-taskforge-rebuild-review.zip > rebuild.zip
+          echo '556c8152783b3644cbfe7af3d07a1f35bc6daefe0c9ee46c984008d6b6035b79  rebuild.zip' | sha256sum --check
+          python3 -m zipfile -e rebuild.zip source
+      - name: Install pinned host and generate from clean baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3.12 -m venv "$RUNNER_TEMP/harbor-host"
+          "$RUNNER_TEMP/harbor-host/bin/pip" install 'harbor==0.25.0'
+          git clone --depth=1 --branch 8.5.1 https://github.com/pallets/click.git baseline
+          test "$(git -C baseline rev-parse HEAD)" = cf19179e8e2fd54c601378cec9e0d21bb12b6fb1
+          python3.12 source/factory.py --repo baseline --out generated
+          python3.12 source/factory.py --repo baseline --out generated-repeat
+          diff generated/manifest.json generated-repeat/manifest.json
+      - name: Ten Harbor nop and oracle passes, no model API
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/harbor-host/bin:$PATH"
+          harbor --version
+          docker version
+          for task in choice-aliases delimited duration key-value stepped-range; do
+            for agent in nop oracle; do
+              harbor run -p "generated/$task" -a "$agent" -k 1 -n 1 -o "$RUNNER_TEMP/harbor-runs/$task/$agent" --no-delete -y
+              "$RUNNER_TEMP/harbor-host/bin/python" source/assert_harbor.py "$RUNNER_TEMP/harbor-runs/$task/$agent" "$agent" "$task"
+            done
+          done
