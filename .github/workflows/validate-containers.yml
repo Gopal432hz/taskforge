@@ -1,0 +1,44 @@
+name: Validate published TaskForge containers
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: taskforge-container-validation
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch exact published source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init published
+          git -C published remote add origin https://github.com/Gopal432hz/taskforge.git
+          git -C published fetch --depth=1 origin f166b5aec9e96e32d72f841de0947278ce07e7c7
+          git -C published show FETCH_HEAD:1-taskforge-source.zip > source.zip
+          echo '665c36643001ca4eb7df02c925e468ce8e1f30897c1e3641ff0dc57ba90b6334  source.zip' | sha256sum --check
+          python3 -m zipfile -e source.zip source
+      - name: Build unchanged images and verify base and reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          tasks=(add-context-settings-parameter-to-clirun add-custom-version-option-freeze-version add-option-get-help-spec-to-return-the-o)
+          for task in "${tasks[@]}"; do
+            package="$GITHUB_WORKSPACE/source/sample-packages/$task"
+            image="taskforge-check:$task"
+            docker build --pull --tag "$image" "$package/environment"
+            for mode in base reference; do
+              logs="$RUNNER_TEMP/taskforge/$task/$mode"
+              mkdir -p "$logs"
+              docker run --rm --network none --cpus 2 --memory 4g --pids-limit 256 \
+                -e MODE="$mode" \
+                -v "$package/tests:/tests:ro" \
+                -v "$package/solution:/solution:ro" \
+                -v "$logs:/logs" \
+                "$image" bash -lc 'set -euo pipefail; if [ "$MODE" = reference ]; then bash /solution/solve.sh; fi; bash /tests/test.sh'
+              python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); expected=int(sys.argv[2]=="reference"); print(sys.argv[3],sys.argv[2],r); assert r["reward"]==expected and r["feature"]==expected and r["regression"]==1,r' "$logs/verifier/reward.json" "$mode" "$task"
+            done
+          done
